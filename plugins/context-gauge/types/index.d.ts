@@ -6,6 +6,9 @@ export type BarData = {
   window: number | null
 }
 
+// The 5-hour rate-limit window: percent used and when it resets, in clock milliseconds.
+export type LimitData = { percent: number; resetsAt: number | null }
+
 export type CompactStatus = 'queued' | 'running' | null
 
 // The session's last compaction, as this mod saw it.
@@ -23,6 +26,7 @@ declare module 'claude-code' {
       compact: CompactStatus
       lastCompact: CompactRecord | null
       lastStatus: LastStatus
+      limit: LimitData | null
     }
   }
 }

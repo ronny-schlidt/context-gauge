@@ -7,7 +7,7 @@
     {
       "name": "context-gauge",
       "source": "./plugins/context-gauge",
-      "description": "Slim band above the prompt: cache time left, hit rate, context in tokens with a traffic light (🟢 up to 100k, 🟡 up to 150k, 🟠 up to 200k, 🔴 beyond), a Compact button and a Last compact button. Click the figures to fold the band."
+      "description": "Slim band above the prompt: cache time left, context in tokens with a traffic light (🟢 up to 100k, 🟡 up to 150k, 🟠 up to 200k, 🔴 beyond), the 5-hour usage limit with its reset, a Compact button and a Last compact button. Click the figures to fold the band."
     }
   ]
 }

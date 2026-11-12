@@ -142,3 +142,33 @@ type TranscriptRow = {
     }
   }
 }
+
+// The 5-hour rate-limit window, as the last API response reported it.
+export type Limit = { percent: number; resetsAt: number | null }
+
+export function fiveHour(limits: readonly { kind: string; percentUsed: number; resetsAt?: string }[]): Limit | null {
+  const window = limits.find(l => l.kind === 'five_hour')
+  if (!window) return null
+  const at = window.resetsAt ? Date.parse(window.resetsAt) : NaN
+
+  return { percent: window.percentUsed, resetsAt: Number.isFinite(at) ? at : null }
+}
+
+export type LimitView = { percent: string; reset: string | null; color: 'green' | 'yellow' | 'red' }
+
+// Green below 60%, orange below 85%, red from there; once the window has reset the old figure says nothing.
+export function limitView(limit: Limit, now: number): LimitView {
+  if (limit.resetsAt !== null && limit.resetsAt <= now) return { percent: '–', reset: null, color: 'green' }
+  const color = limit.percent >= 85 ? 'red' : limit.percent >= 60 ? 'yellow' : 'green'
+  const reset = limit.resetsAt === null ? null : untilReset(limit.resetsAt - now)
+
+  return { percent: `${Math.round(limit.percent)}%`, reset, color }
+}
+
+// 2h 05m, or 42m under an hour.
+export function untilReset(ms: number): string {
+  const minutes = Math.max(0, Math.ceil(ms / MINUTE))
+  const hours = Math.floor(minutes / 60)
+
+  return hours > 0 ? `${hours}h ${String(minutes % 60).padStart(2, '0')}m` : `${minutes}m`
+}

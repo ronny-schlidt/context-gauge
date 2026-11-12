@@ -1,9 +1,9 @@
-// context-gauge: one thin row above the prompt with the cache countdown, the hit rate,
-// the context in tokens with its level dot, and a Compact button.
+// context-gauge: one thin row above the prompt with the cache countdown,
+// the context in tokens with its level dot, the 5-hour limit, and a Compact button.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, SessionContextUsage, SessionMessage, Timer } from 'claude-code'
+import type { EngineInterface, Register, SessionContextUsage, SessionMessage, SessionRateLimit, Timer } from 'claude-code'
 
-import type { BarData, CompactRecord, CompactStatus, LastStatus } from '../types'
+import type { BarData, CompactRecord, CompactStatus, LastStatus, LimitData } from '../types'
 import {
   MINUTE,
   TTL_1H,
@@ -11,7 +11,9 @@ import {
   cacheView,
   chunkSummary,
   compactHeadline,
+  fiveHour,
   hitRate,
+  limitView,
   readTranscriptTail,
   shortTokens,
   level,
@@ -19,6 +21,8 @@ import {
 
 const EMPTY: BarData = { lastAt: null, ttlMs: TTL_5M, hitRate: null, tokens: null, window: null }
 const COLLAPSED_KEY = 'collapsed'
+// The cache lifetime last seen in a transcript, so a new session starts with it instead of 5 minutes.
+const TTL_KEY = 'ttlMs'
 // Lets the engine put its compaction boundary down first, so the lines land under it.
 const LOG_DELAY_MS = 500
 // How long the Last compact button reads "Shown ✓" and ignores presses.
@@ -30,8 +34,13 @@ const collapsed = atom({ plugin: 'context-gauge', key: 'collapsed' } as const, f
 const compact = atom({ plugin: 'context-gauge', key: 'compact' } as const, null as CompactStatus)
 const lastCompact = atom({ plugin: 'context-gauge', key: 'lastCompact' } as const, null as CompactRecord | null)
 const lastStatus = atom({ plugin: 'context-gauge', key: 'lastStatus' } as const, null as LastStatus)
+const limit = atom({ plugin: 'context-gauge', key: 'limit' } as const, null as LimitData | null)
 
 let timers: Timer[] = []
+let limitTimer: Timer | undefined
+let transcriptPath: string | undefined
+// Whether this session's transcript has shown the cache lifetime yet.
+let ttlSeen = false
 let lastSummary: string | undefined
 
 function redraw($: EngineInterface) {
@@ -63,16 +72,27 @@ async function setContext($: EngineInterface, context: SessionContextUsage) {
   await update($, data, d => ({ ...d, window, tokens: tokens ?? d.tokens }))
 }
 
-// The session's context size; a read that fails leaves the last one.
+// A response without a 5-hour reading leaves the last one standing.
+async function setLimit($: EngineInterface, rateLimits: readonly SessionRateLimit[]) {
+  const found = fiveHour(rateLimits)
+  if (found) await update($, limit, () => found)
+}
+
+// The session's context size and rate limits; a read that fails leaves the last ones.
 async function readThreshold($: EngineInterface) {
-  const { context } = await $.session.usage({ breakdown: 'summary' })
+  const { context, rateLimits } = await $.session.usage({ breakdown: 'summary' })
   await setContext($, context)
+  await setLimit($, rateLimits)
 }
 
 async function readTranscript($: EngineInterface, path: string, takeLastAt: boolean) {
   const { exitCode, stdout } = await $.process.run(['tail', '-n', '200', path])
   if (exitCode !== 0) return
   const found = readTranscriptTail(stdout)
+  if (found.ttlMs !== undefined) {
+    ttlSeen = true
+    void $.store.set(TTL_KEY, found.ttlMs).catch(() => {})
+  }
   const after = await update($, data, d => ({
     ...d,
     ttlMs: found.ttlMs ?? d.ttlMs,
@@ -150,9 +170,14 @@ export const register: Register = on => {
     const stored = await $.store.get(COLLAPSED_KEY)
     if (stored === true) await update($, collapsed, () => true)
     const ttl = await $.settings.read({ key: 'promptCacheTtl' }).catch(() => undefined)
+    const learned = await $.store.get(TTL_KEY).catch(() => undefined)
     const known = await read($, data)
-    if (known.lastAt === null && ttl === '1h') await update($, data, d => ({ ...d, ttlMs: TTL_1H }))
+    const start = ttl === '1h' ? TTL_1H : learned === TTL_1H || learned === TTL_5M ? learned : undefined
+    if (known.lastAt === null && start !== undefined) await update($, data, d => ({ ...d, ttlMs: start }))
     if (known.lastAt !== null) startTimers($, known.lastAt, known.ttlMs, await $.clock.now())
+    // The 5-hour countdown moves every minute, cache or not.
+    limitTimer?.cancel()
+    limitTimer = $.clock.every(MINUTE, () => void redraw($).catch(() => {}))
     void readThreshold($).catch(() => {})
 
     return r
@@ -160,6 +185,7 @@ export const register: Register = on => {
 
   on('classic.SessionStart', async ($, e, next) => {
     const r = await next(e)
+    transcriptPath = e.transcript_path
     // A compaction or /clear starts anew; only a resumed conversation brings its last response along.
     if (e.source === 'resume' || e.source === 'fork') void readTranscript($, e.transcript_path, true).catch(() => {})
 
@@ -173,6 +199,8 @@ export const register: Register = on => {
       const hit = hitRate(r.usage)
       const after = await update($, data, d => ({ ...d, lastAt, hitRate: hit }))
       startTimers($, lastAt, after.ttlMs, lastAt)
+      // The response's usage has no 1h/5m split; the transcript has, so read it once instead of waiting for the turn's end.
+      if (!ttlSeen && transcriptPath) void readTranscript($, transcriptPath, false).catch(() => {})
     }
 
     return r
@@ -180,6 +208,7 @@ export const register: Register = on => {
 
   on('classic.Stop', async ($, e, next) => {
     const r = await next(e)
+    transcriptPath = e.transcript_path
     void readTranscript($, e.transcript_path, true).catch(() => {})
 
     return r
@@ -194,6 +223,7 @@ export const register: Register = on => {
 
   on('session.measure', async ($, e, next) => {
     await setContext($, e.context)
+    await setLimit($, e.rateLimits)
 
     return next(e)
   })
@@ -250,17 +280,21 @@ export const register: Register = on => {
     const isCollapsed = await read($, collapsed)
     const status = await read($, compact)
     const last = await read($, lastStatus)
+    const fiveH = await read($, limit)
     const now = await $.clock.now()
 
     const window = d.window ?? 0
     const dot = level(d.tokens)
     const fill = d.tokens !== null && window ? `${shortTokens(d.tokens)} / ${shortTokens(window)}` : '–'
+    const hex = (color: 'green' | 'yellow' | 'red') => (color === 'yellow' ? '#f97316' : color)
     const cache = d.lastAt === null ? null : cacheView(d.lastAt, d.ttlMs, now)
     const left = cache === null ? '–' : cache.isExpired ? 'expired' : `${cache.minutes} min`
     // Without the bar, the minutes themselves carry the cache state: green, then orange, then red.
-    const leftColor = cache === null ? undefined : cache.color === 'yellow' ? '#f97316' : cache.color
+    const leftColor = cache === null ? undefined : hex(cache.color)
     // The desktop draws in a proportional body font, too wide for one row beside the button.
     const small = e.surface === 'desktop' ? { size: 'footnote' as const } : {}
+    // Hidden off a subscription, where the API reports no 5-hour window.
+    const lv = fiveH ? limitView(fiveH, now) : null
 
     const flip = () => {
       const after = !isCollapsed
@@ -279,19 +313,22 @@ export const register: Register = on => {
         {minutes}
         {gap}
         <Text>{fill}</Text>
+        {lv ? gap : null}
+        {lv ? <Text color={hex(lv.color)}>{`5h ${lv.percent}`}</Text> : null}
       </Button>
     ) : (
       <Button key="band" plain onPress={flip}>
         <Text {...small} dimColor>{'Cache '}</Text>
         <Text {...small}>{minutes}</Text>
         {gap}
-        <Text {...small} dimColor>{'Hit '}</Text>
-        <Text {...small}>{d.hitRate === null ? '–' : `${d.hitRate}%`}</Text>
-        {gap}
         <Text {...small}>{dot}</Text>
         {gap}
         <Text {...small} dimColor>{'Context '}</Text>
         <Text {...small}>{fill}</Text>
+        {lv ? gap : null}
+        {lv ? <Text {...small} dimColor>{'5h '}</Text> : null}
+        {lv ? <Text {...small} color={hex(lv.color)}>{lv.percent}</Text> : null}
+        {lv?.reset ? <Text {...small} dimColor>{` · ${lv.reset}`}</Text> : null}
       </Button>
     )
 

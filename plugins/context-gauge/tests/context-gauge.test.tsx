@@ -7,7 +7,10 @@ import {
   cacheView,
   chunkSummary,
   compactHeadline,
+  fiveHour,
   hitRate,
+  limitView,
+  untilReset,
   readTranscriptTail,
   shortTokens,
   level,
@@ -109,12 +112,12 @@ const DATA = {
   window: 1_000_000,
 }
 
-test('the band draws every figure and the Compact button, on the terminal and on desktop', async ($, on) => {
+test('the band draws cache, dot, context and the buttons, without the hit rate, on the terminal and on desktop', async ($, on) => {
   seed(on, { data: DATA, tick: 1, collapsed: false, compact: null })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...BAND, surface })
     expect((await ui.find({ type: 'Text', text: /60 min|59 min/ }))).toBeTruthy()
-    expect((await ui.find({ type: 'Text', text: /97%/ }))).toBeTruthy()
+    expect(await ui.find({ type: 'Text', text: /Hit|97%/ })).toBeFalsy()
     expect((await ui.find({ type: 'Text', text: /🔴/ }))).toBeTruthy()
     expect((await ui.find({ type: 'Text', text: /250k \/ 1M/ }))).toBeTruthy()
     expect(await ui.find({ type: 'Text', text: /Auto-Compact/ })).toBeFalsy()
@@ -164,3 +167,40 @@ for (const isCollapsed of [false, true]) {
     }
   })
 }
+
+test('the 5-hour window is picked from the rate limits and counts down to its reset', () => {
+  const at = '2026-11-12T16:00:00.000Z'
+  expect(fiveHour([{ kind: 'seven_day', percentUsed: 10 }, { kind: 'five_hour', percentUsed: 42.5, resetsAt: at }])).toEqual({
+    percent: 42.5,
+    resetsAt: Date.parse(at),
+  })
+  expect(fiveHour([{ kind: 'seven_day', percentUsed: 10 }])).toBe(null)
+  expect(untilReset(125 * MINUTE)).toBe('2h 05m')
+  expect(untilReset(42 * MINUTE - 1000)).toBe('42m')
+  expect(limitView({ percent: 42.5, resetsAt: 60 * MINUTE }, 0)).toEqual({ percent: '43%', reset: '1h 00m', color: 'green' })
+  expect(limitView({ percent: 60, resetsAt: null }, 0).color).toBe('yellow')
+  expect(limitView({ percent: 85, resetsAt: null }, 0).color).toBe('red')
+  expect(limitView({ percent: 90, resetsAt: 1000 }, 2000)).toEqual({ percent: '–', reset: null, color: 'green' })
+})
+
+for (const isCollapsed of [false, true]) {
+  test(`the band shows the 5-hour limit (collapsed: ${isCollapsed})`, async ($, on) => {
+    const limit = { percent: 42, resetsAt: Date.now() + 125 * MINUTE }
+    seed(on, { data: DATA, tick: 1, collapsed: isCollapsed, compact: null, lastStatus: null, limit })
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      const band = JSON.stringify(await ui.find({ type: 'Button', key: 'band' }))
+      expect(band).toContain('42%')
+      expect(band).toContain('5h')
+      if (!isCollapsed) expect(band).toMatch(/2h 0[45]m/)
+      await ui.unmount()
+    }
+  })
+}
+
+test('without a 5-hour reading the band leaves the limit out', async ($, on) => {
+  seed(on, { data: DATA, tick: 1, collapsed: false, compact: null, lastStatus: null, limit: null })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(JSON.stringify(await ui.find({ type: 'Button', key: 'band' }))).not.toContain('5h')
+  await ui.unmount()
+})

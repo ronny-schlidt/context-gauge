@@ -2,14 +2,14 @@
 
 A Claude Code mod: one slim band above the prompt that shows
 
-- **Cache**: minutes until the prompt cache expires (green, then orange, then red)
-- **Hit**: the share of the last request's input that came from the cache
+- **Cache**: minutes until the prompt cache expires (green, then orange, then red); the 1-hour or 5-minute lifetime is read from the transcript and remembered
 - **🟢 🟡 🟠 🔴**: how full the context is (up to 100k, 150k, 200k tokens, beyond)
 - **Context**: tokens used out of the context window, e.g. `137k / 1M`
+- **5h**: how much of the 5-hour usage limit is used and when it resets, e.g. `5h 42% · 2h 05m` (green, orange from 60%, red from 85%; hidden without a subscription)
 - **Compact**: compacts the conversation (highlighted once the dot turns red)
 - **Last compact**: shows the last compaction's token counts and summary in the transcript
 
-Click the figures to fold the band down to the dot, the minutes and the context.
+Click the figures to fold the band down to the dot, the minutes, the context and the 5-hour figure.
 
 ## Install
 
