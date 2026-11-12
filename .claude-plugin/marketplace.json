@@ -1,0 +1,13 @@
+{
+  "name": "kontext-wetter",
+  "owner": {
+    "name": "Ronny Schlidt"
+  },
+  "plugins": [
+    {
+      "name": "kontext-wetter",
+      "source": "./plugins/kontext-wetter",
+      "description": "Slim band above the prompt: cache time left, hit rate, context in tokens with a traffic light (🟢 up to 100k, 🟡 up to 150k, 🟠 up to 200k, 🔴 beyond), a Compact button and a Last compact button. Click the figures to fold the band."
+    }
+  ]
+}
