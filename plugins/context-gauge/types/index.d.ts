@@ -61,12 +61,15 @@ export type CompactMeta = {
   chunks: Record<Side, number>
 }
 
+export type BandView = 'full' | 'lean' | 'short'
+
 declare module 'claude-code' {
   interface PluginState {
     'context-gauge': {
       data: BarData
       tick: number
-      collapsed: boolean
+      /** The band's look, switched by a click on the figures: everything, without Last compact, or short. */
+      view: BandView
       compact: CompactStatus
       lastCompact: CompactRecord | null
       lastStatus: LastStatus

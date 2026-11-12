@@ -16,7 +16,7 @@ Each figure has its own dot:
 - **Compact**: compacts the conversation (highlighted once the context dot turns red).
 - **Last compact**: shows the last compaction's token counts and summary in the transcript.
 
-Click the figures to fold the band down to the dots and numbers.
+Click the figures to switch between three looks: everything, the same without the Last compact button, and short (only the dots and numbers).
 
 ## Built in
 

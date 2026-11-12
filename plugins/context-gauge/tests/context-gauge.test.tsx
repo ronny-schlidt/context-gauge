@@ -113,7 +113,7 @@ const DATA = {
 }
 
 test('the band draws cache, dot, context and the buttons, without the hit rate, on the terminal and on desktop', async ($, on) => {
-  seed(on, { data: DATA, tick: 1, collapsed: false, compact: null })
+  seed(on, { data: DATA, tick: 1, view: 'full', compact: null })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...BAND, surface })
     expect((await ui.find({ type: 'Text', text: /60 min|59 min/ }))).toBeTruthy()
@@ -128,7 +128,7 @@ test('the band draws cache, dot, context and the buttons, without the hit rate, 
 })
 
 test('collapsed it keeps the dot, the cache time and the context alone', async ($, on) => {
-  seed(on, { data: DATA, tick: 1, collapsed: true, compact: null })
+  seed(on, { data: DATA, tick: 1, view: 'short', compact: null })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...BAND, surface })
     expect((await ui.find({ type: 'Text', text: /🔴/ }))).toBeTruthy()
@@ -140,7 +140,7 @@ test('collapsed it keeps the dot, the cache time and the context alone', async (
 })
 
 test('with the time up it reads expired', async ($, on) => {
-  seed(on, { data: { ...DATA, lastAt: Date.now() - 2 * TTL_1H }, tick: 1, collapsed: false, compact: null })
+  seed(on, { data: { ...DATA, lastAt: Date.now() - 2 * TTL_1H }, tick: 1, view: 'full', compact: null })
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   expect(await ui.find({ type: 'Text', text: /expired/ })).toBeTruthy()
   await ui.unmount()
@@ -148,7 +148,7 @@ test('with the time up it reads expired', async ($, on) => {
 
 for (const [status, label] of [['shown', 'Shown ✓'], ['loading', 'Loading…'], [null, 'Last compact']] as const) {
   test(`the Last compact button reads ${label} while its status is ${status}`, async ($, on) => {
-    seed(on, { data: DATA, tick: 1, collapsed: false, compact: null, lastStatus: status })
+    seed(on, { data: DATA, tick: 1, view: 'full', compact: null, lastStatus: status })
     const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
     const button = await ui.find({ type: 'Button', key: 'last-compact' })
     expect(JSON.stringify(button)).toContain(label)
@@ -158,7 +158,7 @@ for (const [status, label] of [['shown', 'Shown ✓'], ['loading', 'Loading…']
 
 for (const isCollapsed of [false, true]) {
   test(`the figures are one button that folds the band (collapsed: ${isCollapsed})`, async ($, on) => {
-    seed(on, { data: DATA, tick: 1, collapsed: isCollapsed, compact: null, lastStatus: null })
+    seed(on, { data: DATA, tick: 1, view: isCollapsed ? 'short' : 'full', compact: null, lastStatus: null })
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount({ ...BAND, surface })
       const band = await ui.find({ type: 'Button', key: 'band' })
@@ -186,7 +186,7 @@ test('the 5-hour window is picked from the rate limits and counts down to its re
 for (const isCollapsed of [false, true]) {
   test(`the band shows the 5-hour limit (collapsed: ${isCollapsed})`, async ($, on) => {
     const limit = { percent: 42, resetsAt: Date.now() + 125 * MINUTE }
-    seed(on, { data: DATA, tick: 1, collapsed: isCollapsed, compact: null, lastStatus: null, limit })
+    seed(on, { data: DATA, tick: 1, view: isCollapsed ? 'short' : 'full', compact: null, lastStatus: null, limit })
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount({ ...BAND, surface })
       const band = JSON.stringify(await ui.find({ type: 'Button', key: 'band' }))
@@ -199,7 +199,7 @@ for (const isCollapsed of [false, true]) {
 }
 
 test('without a 5-hour reading the band leaves the limit out', async ($, on) => {
-  seed(on, { data: DATA, tick: 1, collapsed: false, compact: null, lastStatus: null, limit: null })
+  seed(on, { data: DATA, tick: 1, view: 'full', compact: null, lastStatus: null, limit: null })
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   expect(JSON.stringify(await ui.find({ type: 'Button', key: 'band' }))).not.toContain('5h')
   await ui.unmount()
@@ -207,7 +207,7 @@ test('without a 5-hour reading the band leaves the limit out', async ($, on) => 
 
 test('each figure has its own dot and label: cache, context, 5 hours', async ($, on) => {
   const limit = { percent: 90, resetsAt: Date.now() + 30 * MINUTE }
-  seed(on, { data: { ...DATA, tokens: 120_000 }, tick: 1, collapsed: false, compact: null, lastStatus: null, limit })
+  seed(on, { data: { ...DATA, tokens: 120_000 }, tick: 1, view: 'full', compact: null, lastStatus: null, limit })
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const band = JSON.stringify(await ui.find({ type: 'Button', key: 'band' }))
   expect(band).toMatch(/🟢.*Cache:.*🟡.*Context:.*🔴.*5h:/)
@@ -216,8 +216,48 @@ test('each figure has its own dot and label: cache, context, 5 hours', async ($,
 })
 
 test('an expired cache gets a red dot', async ($, on) => {
-  seed(on, { data: { ...DATA, lastAt: Date.now() - 2 * TTL_1H }, tick: 1, collapsed: true, compact: null, lastStatus: null })
+  seed(on, { data: { ...DATA, lastAt: Date.now() - 2 * TTL_1H }, tick: 1, view: 'short', compact: null, lastStatus: null })
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   expect(JSON.stringify(await ui.find({ type: 'Button', key: 'band' }))).toMatch(/🔴.*expired/)
   await ui.unmount()
+})
+
+test('the lean look keeps the full figures and Compact, without Last compact', async ($, on) => {
+  seed(on, { data: DATA, tick: 1, view: 'lean', compact: null, lastStatus: null })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...BAND, surface })
+    expect(JSON.stringify(await ui.find({ type: 'Button', key: 'band' }))).toContain('Context:')
+    expect(await ui.find({ type: 'Button', key: 'compact' })).toBeTruthy()
+    expect(await ui.find({ type: 'Button', key: 'last-compact' })).toBeFalsy()
+    await ui.unmount()
+  }
+})
+
+test('a click on the figures goes full, lean, short and back to full', async ($, on) => {
+  const state: Record<string, unknown> = { data: DATA, tick: 1, view: 'full', compact: null, lastStatus: null }
+  on('state.get', (_, e) => ({ value: { value: state[e.key], version: 1 } }))
+  on('state.set', (_, e) => {
+    state[e.key] = e.value
+    return { value: { isSet: true, version: 2 } }
+  })
+  const saved: unknown[] = []
+  on('store.set', (_, e) => {
+    saved.push(e.value)
+    return { value: undefined }
+  })
+  on('clock.now', () => ({ value: Date.now() }))
+  on('ui.render', ($, e) => {
+    const { Box } = $.ui.resolve(e)
+
+    return <Box />
+  })
+  const seen: unknown[] = []
+  for (let i = 0; i < 3; i++) {
+    const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+    await ui.press({ key: 'band' })
+    seen.push(state.view)
+    await ui.unmount()
+  }
+  expect(seen).toEqual(['lean', 'short', 'full'])
+  expect(saved).toEqual(['lean', 'short', 'full'])
 })

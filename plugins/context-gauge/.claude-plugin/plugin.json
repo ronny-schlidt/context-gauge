@@ -1,6 +1,6 @@
 {
   "name": "context-gauge",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "One mod for the prompt cache and context: a band above the prompt with cache time, context and the 5-hour limit, Compact and Last compact buttons; cache-tax (keeps the 1-hour cache warm, guards cold sends) and visible-compact (before/after pane of each compaction) built in.",
   "types": "./types/index.d.ts",
   "userConfig": {

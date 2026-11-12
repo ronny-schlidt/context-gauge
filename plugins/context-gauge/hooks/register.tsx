@@ -25,7 +25,7 @@ import {
   vcSetup,
   vcUiRenderPaneVisibleCompact,
 } from './visible-compact/register'
-import type { BarData, CompactRecord, CompactStatus, LastStatus, LimitData } from '../types'
+import type { BandView, BarData, CompactRecord, CompactStatus, LastStatus, LimitData } from '../types'
 import {
   MINUTE,
   TTL_1H,
@@ -44,6 +44,9 @@ import {
 
 const EMPTY: BarData = { lastAt: null, ttlMs: TTL_5M, hitRate: null, tokens: null, window: null }
 const COLLAPSED_KEY = 'collapsed'
+const VIEW_KEY = 'view'
+// A click on the figures moves to the next look.
+const NEXT_VIEW: Record<BandView, BandView> = { full: 'lean', lean: 'short', short: 'full' }
 // The cache lifetime last seen in a transcript, so a new session starts with it instead of 5 minutes.
 const TTL_KEY = 'ttlMs'
 // Lets the engine put its compaction boundary down first, so the lines land under it.
@@ -53,7 +56,7 @@ const SHOWN_MS = 2000
 
 const data = atom({ plugin: 'context-gauge', key: 'data' } as const, EMPTY)
 const tick = atom({ plugin: 'context-gauge', key: 'tick' } as const, 0)
-const collapsed = atom({ plugin: 'context-gauge', key: 'collapsed' } as const, false)
+const bandView = atom({ plugin: 'context-gauge', key: 'view' } as const, 'full' as BandView)
 const compact = atom({ plugin: 'context-gauge', key: 'compact' } as const, null as CompactStatus)
 const lastCompact = atom({ plugin: 'context-gauge', key: 'lastCompact' } as const, null as CompactRecord | null)
 const lastStatus = atom({ plugin: 'context-gauge', key: 'lastStatus' } as const, null as LastStatus)
@@ -207,8 +210,11 @@ async function showLastCompact($: EngineInterface) {
 
 export const gaugeSessionStart: Hook<'session.start'> = async ($, e, next) => {
     const r = await next(e)
-    const stored = await $.store.get(COLLAPSED_KEY)
-    if (stored === true) await update($, collapsed, () => true)
+    const stored = await $.store.get(VIEW_KEY).catch(() => undefined)
+    // Before 0.12 the band knew only folded (stored as collapsed: true) or not.
+    const legacy = stored === undefined ? await $.store.get(COLLAPSED_KEY).catch(() => undefined) : undefined
+    const view = stored === 'full' || stored === 'lean' || stored === 'short' ? stored : legacy === true ? 'short' : undefined
+    if (view !== undefined) await update($, bandView, () => view)
     const ttl = await $.settings.read({ key: 'promptCacheTtl' }).catch(() => undefined)
     const learned = await $.store.get(TTL_KEY).catch(() => undefined)
     const known = await read($, data)
@@ -325,7 +331,8 @@ export const gaugeUiRenderAbovePrompt: MatchedHook<'ui.render', { component: 'Ab
     const { Box, Button, Text } = $.ui.resolve(e)
     await read($, tick)
     const d = await read($, data)
-    const isCollapsed = await read($, collapsed)
+    const view = await read($, bandView)
+    const isCollapsed = view === 'short'
     const status = await read($, compact)
     const last = await read($, lastStatus)
     const fiveH = await read($, limit)
@@ -344,9 +351,9 @@ export const gaugeUiRenderAbovePrompt: MatchedHook<'ui.render', { component: 'Ab
     const lv = fiveH ? limitView(fiveH, now) : null
 
     const flip = () => {
-      const after = !isCollapsed
-      void update($, collapsed, () => after)
-      void $.store.set(COLLAPSED_KEY, after)
+      const after = NEXT_VIEW[view] ?? 'full'
+      void update($, bandView, () => after)
+      void $.store.set(VIEW_KEY, after).catch(() => {})
     }
     // A Button holds strings and Text alone; no-break spaces (which the desktop keeps) set the gaps.
     const nb = '\u00a0'
@@ -355,7 +362,7 @@ export const gaugeUiRenderAbovePrompt: MatchedHook<'ui.render', { component: 'Ab
     const value = (text: string) => <Text {...small} bold>{text}</Text>
     const lead = (mark: string) => <Text {...small}>{`${mark}${nb}`}</Text>
 
-    // Only a Button takes a click, so the figures themselves are one plain Button that folds the band.
+    // Only a Button takes a click, so the figures themselves are one plain Button that switches the band's look.
     const figures = isCollapsed ? (
       <Button key="band" plain onPress={flip}>
         {lead(cacheDot)}
@@ -402,11 +409,13 @@ export const gaugeUiRenderAbovePrompt: MatchedHook<'ui.render', { component: 'Ab
             {...(dot === '🔴' ? { variant: 'primary' as const } : {})}
             onPress={press => void pressCompact($, press.surface, e.props.isWorking).catch(() => {})}
           />
-          <Button
-            key="last-compact"
-            label={last === 'shown' ? 'Shown ✓' : last === 'loading' ? 'Loading…' : 'Last compact'}
-            onPress={() => void showLastCompact($).catch(() => {})}
-          />
+          {view === 'lean' ? null : (
+            <Button
+              key="last-compact"
+              label={last === 'shown' ? 'Shown ✓' : last === 'loading' ? 'Loading…' : 'Last compact'}
+              onPress={() => void showLastCompact($).catch(() => {})}
+            />
+          )}
         </Box>
       </Box>
     )
