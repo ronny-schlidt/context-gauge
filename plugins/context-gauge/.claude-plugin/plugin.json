@@ -1,6 +1,6 @@
 {
-  "name": "kontext-wetter",
-  "version": "0.8.0",
+  "name": "context-gauge",
+  "version": "0.9.0",
   "description": "Slim band above the prompt: cache time left, hit rate, context in tokens with a traffic light (🟢 up to 100k, 🟡 up to 150k, 🟠 up to 200k, 🔴 beyond), a Compact button and a Last compact button that shows the last compaction's summary at once.",
   "types": "./types/index.d.ts"
 }

@@ -1,4 +1,4 @@
-# kontext-wetter
+# context-gauge
 
 A Claude Code mod: one slim band above the prompt that shows
 
@@ -16,24 +16,24 @@ Click the figures to fold the band down to the dot, the minutes and the context.
 At the prompt of a Claude Code terminal session:
 
 ```
-/plugin install kontext-wetter --marketplace ronny-schlidt/kontext-wetter
+/plugin install context-gauge --marketplace ronny-schlidt/context-gauge
 ```
 
 From a shell:
 
 ```sh
-claude plugin install kontext-wetter --marketplace ronny-schlidt/kontext-wetter
+claude plugin install context-gauge --marketplace ronny-schlidt/context-gauge
 ```
 
-In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `ronny-schlidt/kontext-wetter`, then Add plugin.
+In the desktop app, where `/plugin` does not run: click + next to the prompt box, then Plugins, Add marketplace with `ronny-schlidt/context-gauge`, then Add plugin.
 
 The band shows in sessions started after the install.
 
 ## Update
 
 ```sh
-claude plugin marketplace update kontext-wetter
-claude plugin update kontext-wetter@kontext-wetter
+claude plugin marketplace update context-gauge
+claude plugin update context-gauge@context-gauge
 ```
 
 ## Optional

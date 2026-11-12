@@ -43,9 +43,9 @@ export const GREEN_TOKENS = 100_000
 export const YELLOW_TOKENS = 150_000
 export const ORANGE_TOKENS = 200_000
 
-export type Weather = '🟢' | '🟡' | '🟠' | '🔴'
+export type Level = '🟢' | '🟡' | '🟠' | '🔴'
 
-export function weather(tokens: number | null): Weather {
+export function level(tokens: number | null): Level {
   const used = tokens ?? 0
   if (used <= GREEN_TOKENS) return '🟢'
   if (used <= YELLOW_TOKENS) return '🟡'

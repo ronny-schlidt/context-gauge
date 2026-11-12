@@ -10,11 +10,11 @@ import {
   hitRate,
   readTranscriptTail,
   shortTokens,
-  weather,
+  level,
 } from '../hooks/logic'
 
 const BAND = {
-  plugin: 'kontext-wetter',
+  plugin: 'context-gauge',
   component: 'AbovePrompt',
   requestId: 'above-prompt',
   props: {
@@ -46,13 +46,13 @@ test('the hit rate is the cached share of all input tokens', () => {
 })
 
 test('the dot turns yellow past 100k, orange past 150k, red past 200k tokens', () => {
-  expect(weather(null)).toBe('🟢')
-  expect(weather(100_000)).toBe('🟢')
-  expect(weather(100_001)).toBe('🟡')
-  expect(weather(150_000)).toBe('🟡')
-  expect(weather(150_001)).toBe('🟠')
-  expect(weather(200_000)).toBe('🟠')
-  expect(weather(200_001)).toBe('🔴')
+  expect(level(null)).toBe('🟢')
+  expect(level(100_000)).toBe('🟢')
+  expect(level(100_001)).toBe('🟡')
+  expect(level(150_000)).toBe('🟡')
+  expect(level(150_001)).toBe('🟠')
+  expect(level(200_000)).toBe('🟠')
+  expect(level(200_001)).toBe('🔴')
 })
 
 test('the headline names the tokens before and after', () => {
@@ -124,7 +124,7 @@ test('the band draws every figure and the Compact button, on the terminal and on
   }
 })
 
-test('collapsed it keeps the weather, the cache time and the context alone', async ($, on) => {
+test('collapsed it keeps the dot, the cache time and the context alone', async ($, on) => {
   seed(on, { data: DATA, tick: 1, collapsed: true, compact: null })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...BAND, surface })

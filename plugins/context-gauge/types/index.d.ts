@@ -16,7 +16,7 @@ export type LastStatus = 'shown' | 'loading' | null
 
 declare module 'claude-code' {
   interface PluginState {
-    'kontext-wetter': {
+    'context-gauge': {
       data: BarData
       tick: number
       collapsed: boolean

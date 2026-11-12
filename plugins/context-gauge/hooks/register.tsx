@@ -1,5 +1,5 @@
-// Kontext-Wetter: one thin row above the prompt with the cache countdown, the hit rate,
-// the context in tokens with its weather, and a Compact button.
+// context-gauge: one thin row above the prompt with the cache countdown, the hit rate,
+// the context in tokens with its level dot, and a Compact button.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, SessionContextUsage, SessionMessage, Timer } from 'claude-code'
 
@@ -14,7 +14,7 @@ import {
   hitRate,
   readTranscriptTail,
   shortTokens,
-  weather,
+  level,
 } from './logic'
 
 const EMPTY: BarData = { lastAt: null, ttlMs: TTL_5M, hitRate: null, tokens: null, window: null }
@@ -24,12 +24,12 @@ const LOG_DELAY_MS = 500
 // How long the Last compact button reads "Shown ✓" and ignores presses.
 const SHOWN_MS = 2000
 
-const data = atom({ plugin: 'kontext-wetter', key: 'data' } as const, EMPTY)
-const tick = atom({ plugin: 'kontext-wetter', key: 'tick' } as const, 0)
-const collapsed = atom({ plugin: 'kontext-wetter', key: 'collapsed' } as const, false)
-const compact = atom({ plugin: 'kontext-wetter', key: 'compact' } as const, null as CompactStatus)
-const lastCompact = atom({ plugin: 'kontext-wetter', key: 'lastCompact' } as const, null as CompactRecord | null)
-const lastStatus = atom({ plugin: 'kontext-wetter', key: 'lastStatus' } as const, null as LastStatus)
+const data = atom({ plugin: 'context-gauge', key: 'data' } as const, EMPTY)
+const tick = atom({ plugin: 'context-gauge', key: 'tick' } as const, 0)
+const collapsed = atom({ plugin: 'context-gauge', key: 'collapsed' } as const, false)
+const compact = atom({ plugin: 'context-gauge', key: 'compact' } as const, null as CompactStatus)
+const lastCompact = atom({ plugin: 'context-gauge', key: 'lastCompact' } as const, null as CompactRecord | null)
+const lastStatus = atom({ plugin: 'context-gauge', key: 'lastStatus' } as const, null as LastStatus)
 
 let timers: Timer[] = []
 let lastSummary: string | undefined
@@ -253,7 +253,7 @@ export const register: Register = on => {
     const now = await $.clock.now()
 
     const window = d.window ?? 0
-    const sky = weather(d.tokens)
+    const dot = level(d.tokens)
     const fill = d.tokens !== null && window ? `${shortTokens(d.tokens)} / ${shortTokens(window)}` : '–'
     const cache = d.lastAt === null ? null : cacheView(d.lastAt, d.ttlMs, now)
     const left = cache === null ? '–' : cache.isExpired ? 'expired' : `${cache.minutes} min`
@@ -274,7 +274,7 @@ export const register: Register = on => {
     // folds the band; a Button holds strings and Text alone, so no-break spaces (which the desktop keeps) stand for the gaps.
     const figures = isCollapsed ? (
       <Button key="band" plain onPress={flip}>
-        <Text>{sky}</Text>
+        <Text>{dot}</Text>
         {gap}
         {minutes}
         {gap}
@@ -288,7 +288,7 @@ export const register: Register = on => {
         <Text {...small} dimColor>{'Hit '}</Text>
         <Text {...small}>{d.hitRate === null ? '–' : `${d.hitRate}%`}</Text>
         {gap}
-        <Text {...small}>{sky}</Text>
+        <Text {...small}>{dot}</Text>
         {gap}
         <Text {...small} dimColor>{'Context '}</Text>
         <Text {...small}>{fill}</Text>
@@ -309,7 +309,7 @@ export const register: Register = on => {
           <Button
             key="compact"
             label={status === 'queued' ? 'Compact queued' : status === 'running' ? 'Compacting…' : 'Compact'}
-            {...(sky === '🔴' ? { variant: 'primary' as const } : {})}
+            {...(dot === '🔴' ? { variant: 'primary' as const } : {})}
             onPress={press => void pressCompact($, press.surface, e.props.isWorking).catch(() => {})}
           />
           <Button
