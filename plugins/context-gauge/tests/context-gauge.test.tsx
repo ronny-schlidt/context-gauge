@@ -204,3 +204,20 @@ test('without a 5-hour reading the band leaves the limit out', async ($, on) => 
   expect(JSON.stringify(await ui.find({ type: 'Button', key: 'band' }))).not.toContain('5h')
   await ui.unmount()
 })
+
+test('each figure has its own dot and label: cache, context, 5 hours', async ($, on) => {
+  const limit = { percent: 90, resetsAt: Date.now() + 30 * MINUTE }
+  seed(on, { data: { ...DATA, tokens: 120_000 }, tick: 1, collapsed: false, compact: null, lastStatus: null, limit })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const band = JSON.stringify(await ui.find({ type: 'Button', key: 'band' }))
+  expect(band).toMatch(/🟢.*Cache:.*🟡.*Context:.*🔴.*5h:/)
+  expect(band).toContain('│')
+  await ui.unmount()
+})
+
+test('an expired cache gets a red dot', async ($, on) => {
+  seed(on, { data: { ...DATA, lastAt: Date.now() - 2 * TTL_1H }, tick: 1, collapsed: true, compact: null, lastStatus: null })
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(JSON.stringify(await ui.find({ type: 'Button', key: 'band' }))).toMatch(/🔴.*expired/)
+  await ui.unmount()
+})

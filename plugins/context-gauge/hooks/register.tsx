@@ -1,8 +1,30 @@
 // context-gauge: one thin row above the prompt with the cache countdown,
 // the context in tokens with its level dot, the 5-hour limit, and a Compact button.
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, SessionContextUsage, SessionMessage, SessionRateLimit, Timer } from 'claude-code'
+import type { EngineInterface, Hook, MatchedHook, Register, SessionContextUsage, SessionMessage, SessionRateLimit, StreamHook, Timer } from 'claude-code'
 
+import {
+  ctClassicSessionStart,
+  ctCommandRunCacheTax,
+  ctCommandRunKeepwarm,
+  ctConfigSetTheme,
+  ctPromptSubmit,
+  ctSessionCompact,
+  ctSessionEnd,
+  ctSessionStart,
+  ctSetup,
+  ctTurnComplete,
+  ctTurnStep,
+  ctUiRenderAbovePrompt,
+} from './cache-tax/register'
+import {
+  vcCommandRunShowLastCompact,
+  vcSessionCompact,
+  vcSessionEnd,
+  vcSessionStart,
+  vcSetup,
+  vcUiRenderPaneVisibleCompact,
+} from './visible-compact/register'
 import type { BarData, CompactRecord, CompactStatus, LastStatus, LimitData } from '../types'
 import {
   MINUTE,
@@ -17,6 +39,7 @@ import {
   readTranscriptTail,
   shortTokens,
   level,
+  stateDot,
 } from './logic'
 
 const EMPTY: BarData = { lastAt: null, ttlMs: TTL_5M, hitRate: null, tokens: null, window: null }
@@ -37,7 +60,7 @@ const lastStatus = atom({ plugin: 'context-gauge', key: 'lastStatus' } as const,
 const limit = atom({ plugin: 'context-gauge', key: 'limit' } as const, null as LimitData | null)
 
 let timers: Timer[] = []
-let limitTimer: Timer | undefined
+let limitTimers: Timer[] = []
 let transcriptPath: string | undefined
 // Whether this session's transcript has shown the cache lifetime yet.
 let ttlSeen = false
@@ -75,7 +98,25 @@ async function setContext($: EngineInterface, context: SessionContextUsage) {
 // A response without a 5-hour reading leaves the last one standing.
 async function setLimit($: EngineInterface, rateLimits: readonly SessionRateLimit[]) {
   const found = fiveHour(rateLimits)
-  if (found) await update($, limit, () => found)
+  if (!found) return
+  const before = await read($, limit)
+  await update($, limit, () => found)
+  if (before?.resetsAt !== found.resetsAt) startLimitTimer($, found, await $.clock.now())
+}
+
+// The 5-hour countdown moves each minute until the window resets.
+function startLimitTimer($: EngineInterface, window: LimitData, now: number) {
+  for (const timer of limitTimers) timer.cancel()
+  limitTimers = []
+  if (window.resetsAt === null || window.resetsAt <= now) return
+  const every = $.clock.every(MINUTE, () => void redraw($).catch(() => {}))
+  limitTimers.push(
+    every,
+    $.clock.after(window.resetsAt - now, () => {
+      every.cancel()
+      void redraw($).catch(() => {})
+    }),
+  )
 }
 
 // The session's context size and rate limits; a read that fails leaves the last ones.
@@ -164,8 +205,7 @@ async function showLastCompact($: EngineInterface) {
   }
 }
 
-export const register: Register = on => {
-  on('session.start', async ($, e, next) => {
+export const gaugeSessionStart: Hook<'session.start'> = async ($, e, next) => {
     const r = await next(e)
     const stored = await $.store.get(COLLAPSED_KEY)
     if (stored === true) await update($, collapsed, () => true)
@@ -175,24 +215,25 @@ export const register: Register = on => {
     const start = ttl === '1h' ? TTL_1H : learned === TTL_1H || learned === TTL_5M ? learned : undefined
     if (known.lastAt === null && start !== undefined) await update($, data, d => ({ ...d, ttlMs: start }))
     if (known.lastAt !== null) startTimers($, known.lastAt, known.ttlMs, await $.clock.now())
-    // The 5-hour countdown moves every minute, cache or not.
-    limitTimer?.cancel()
-    limitTimer = $.clock.every(MINUTE, () => void redraw($).catch(() => {}))
+    const knownLimit = await read($, limit)
+    if (knownLimit) startLimitTimer($, knownLimit, await $.clock.now())
     void readThreshold($).catch(() => {})
 
     return r
-  })
+}
 
-  on('classic.SessionStart', async ($, e, next) => {
+
+export const gaugeClassicSessionStart: Hook<'classic.SessionStart'> = async ($, e, next) => {
     const r = await next(e)
     transcriptPath = e.transcript_path
     // A compaction or /clear starts anew; only a resumed conversation brings its last response along.
     if (e.source === 'resume' || e.source === 'fork') void readTranscript($, e.transcript_path, true).catch(() => {})
 
     return r
-  })
+}
 
-  on('turn.step', async function* ($, e, next) {
+
+export const gaugeTurnStep: StreamHook<'turn.step'> = async function* ($, e, next) {
     const r = yield* next(e)
     if (e.agentId === undefined && r.usage) {
       const lastAt = await $.clock.now()
@@ -204,37 +245,42 @@ export const register: Register = on => {
     }
 
     return r
-  })
+}
 
-  on('classic.Stop', async ($, e, next) => {
+
+export const gaugeClassicStop: Hook<'classic.Stop'> = async ($, e, next) => {
     const r = await next(e)
     transcriptPath = e.transcript_path
     void readTranscript($, e.transcript_path, true).catch(() => {})
 
     return r
-  })
+}
 
-  on('turn.complete', async ($, e, next) => {
+
+export const gaugeTurnComplete: Hook<'turn.complete'> = async ($, e, next) => {
     const r = await next(e)
     if (e.agentId === undefined) void readThreshold($).catch(() => {})
 
     return r
-  })
+}
 
-  on('session.measure', async ($, e, next) => {
+
+export const gaugeSessionMeasure: Hook<'session.measure'> = async ($, e, next) => {
     await setContext($, e.context)
     await setLimit($, e.rateLimits)
 
     return next(e)
-  })
+}
 
-  on('classic.PostCompact', async ($, e, next) => {
+
+export const gaugeClassicPostCompact: Hook<'classic.PostCompact'> = async ($, e, next) => {
     lastSummary = e.compact_summary
 
     return next(e)
-  })
+}
 
-  on('session.compact', async ($, e, next) => {
+
+export const gaugeSessionCompact: Hook<'session.compact'> = async ($, e, next) => {
     if (e.trigger === 'precompute' || e.agentId !== undefined) return next(e)
     lastSummary = undefined
     try {
@@ -257,9 +303,10 @@ export const register: Register = on => {
     } finally {
       await update($, compact, () => null)
     }
-  })
+}
 
-  on('session.end', async ($, e, next) => {
+
+export const gaugeSessionEnd: Hook<'session.end'> = async ($, e, next) => {
     if (e.reason === 'clear') {
       for (const timer of timers) timer.cancel()
       timers = []
@@ -268,9 +315,10 @@ export const register: Register = on => {
     }
 
     return next(e)
-  })
+}
 
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+
+export const gaugeUiRenderAbovePrompt: MatchedHook<'ui.render', { component: 'AbovePrompt' }> = async ($, e, next) => {
     const rest = await next(e)
     if (e.props.hasSurvey) return rest
 
@@ -286,11 +334,10 @@ export const register: Register = on => {
     const window = d.window ?? 0
     const dot = level(d.tokens)
     const fill = d.tokens !== null && window ? `${shortTokens(d.tokens)} / ${shortTokens(window)}` : '–'
-    const hex = (color: 'green' | 'yellow' | 'red') => (color === 'yellow' ? '#f97316' : color)
     const cache = d.lastAt === null ? null : cacheView(d.lastAt, d.ttlMs, now)
     const left = cache === null ? '–' : cache.isExpired ? 'expired' : `${cache.minutes} min`
-    // Without the bar, the minutes themselves carry the cache state: green, then orange, then red.
-    const leftColor = cache === null ? undefined : hex(cache.color)
+    // The desktop draws a Button's text in one color, so each figure carries its state as a colored dot.
+    const cacheDot = cache === null ? '⚪' : stateDot(cache.isExpired ? 'red' : cache.color)
     // The desktop draws in a proportional body font, too wide for one row beside the button.
     const small = e.surface === 'desktop' ? { size: 'footnote' as const } : {}
     // Hidden off a subscription, where the API reports no 5-hour window.
@@ -301,34 +348,40 @@ export const register: Register = on => {
       void update($, collapsed, () => after)
       void $.store.set(COLLAPSED_KEY, after)
     }
-    const minutes = <Text {...(leftColor ? { color: leftColor } : {})}>{left}</Text>
-    const gap = '\u00a0\u00a0\u00a0'
+    // A Button holds strings and Text alone; no-break spaces (which the desktop keeps) set the gaps.
+    const nb = '\u00a0'
+    const sep = <Text {...small} dimColor>{`${nb}${nb}${nb}│${nb}${nb}${nb}`}</Text>
+    const label = (text: string) => <Text {...small} dimColor>{`${text}${nb}`}</Text>
+    const value = (text: string) => <Text {...small} bold>{text}</Text>
+    const lead = (mark: string) => <Text {...small}>{`${mark}${nb}`}</Text>
 
-    // Only a Button takes a click, so the figures themselves are one plain Button that
-    // folds the band; a Button holds strings and Text alone, so no-break spaces (which the desktop keeps) stand for the gaps.
+    // Only a Button takes a click, so the figures themselves are one plain Button that folds the band.
     const figures = isCollapsed ? (
       <Button key="band" plain onPress={flip}>
-        <Text>{dot}</Text>
-        {gap}
-        {minutes}
-        {gap}
-        <Text>{fill}</Text>
-        {lv ? gap : null}
-        {lv ? <Text color={hex(lv.color)}>{`5h ${lv.percent}`}</Text> : null}
+        {lead(cacheDot)}
+        {value(left)}
+        {sep}
+        {lead(dot)}
+        {value(fill)}
+        {lv ? sep : null}
+        {lv ? lead(stateDot(lv.color)) : null}
+        {lv ? label('5h:') : null}
+        {lv ? value(lv.percent) : null}
       </Button>
     ) : (
       <Button key="band" plain onPress={flip}>
-        <Text {...small} dimColor>{'Cache '}</Text>
-        <Text {...small}>{minutes}</Text>
-        {gap}
-        <Text {...small}>{dot}</Text>
-        {gap}
-        <Text {...small} dimColor>{'Context '}</Text>
-        <Text {...small}>{fill}</Text>
-        {lv ? gap : null}
-        {lv ? <Text {...small} dimColor>{'5h '}</Text> : null}
-        {lv ? <Text {...small} color={hex(lv.color)}>{lv.percent}</Text> : null}
-        {lv?.reset ? <Text {...small} dimColor>{` · ${lv.reset}`}</Text> : null}
+        {lead(cacheDot)}
+        {label('Cache:')}
+        {value(left)}
+        {sep}
+        {lead(dot)}
+        {label('Context:')}
+        {value(fill)}
+        {lv ? sep : null}
+        {lv ? lead(stateDot(lv.color)) : null}
+        {lv ? label('5h:') : null}
+        {lv ? value(lv.percent) : null}
+        {lv?.reset ? <Text {...small} dimColor>{`${nb}${nb}↻${nb}${lv.reset}`}</Text> : null}
       </Button>
     )
 
@@ -366,5 +419,67 @@ export const register: Register = on => {
     ) : (
       bar
     )
+}
+
+// One plugin hooks each event once, so where context-gauge and the built-in cache-tax
+// (keeps the 1-hour cache warm, guards cold sends) and visible-compact (each compaction's
+// before/after pane) all hook an event, one hook runs theirs in a row. Both are MIT, see licenses/.
+//
+// guard keeps one part's failure from taking the others down: a hook that throws before it
+// called next passes the event on untouched; one that throws after keeps next's answer.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Pass = (e: any) => Promise<any>
+
+async function guard(hook: (next: Pass) => unknown, e: unknown, next: Pass) {
+  // Set inside the callback, so typed wide: the compiler cannot follow it there.
+  let stage = 'before' as 'before' | 'inside' | 'after'
+  let answer: unknown
+  try {
+    return await hook(async input => {
+      stage = 'inside'
+      answer = await next(input)
+      stage = 'after'
+
+      return answer
+    })
+  } catch (error) {
+    if (stage === 'after') return answer
+    // What threw lies beneath this part: not its to swallow.
+    if (stage === 'inside') throw error
+    return next(e)
+  }
+}
+
+export const register: Register = (on, options) => {
+  ctSetup()
+  vcSetup(options)
+
+  on('session.start', ($, e, next) =>
+    guard(n => ctSessionStart($, e, n as never), e, a => guard(n => vcSessionStart($, a, n as never), a, b => guard(n => gaugeSessionStart($, b, n as never), b, next))) as never,
+  )
+  on('session.end', ($, e, next) =>
+    guard(n => ctSessionEnd($, e, n as never), e, a => guard(n => vcSessionEnd($, a, n as never), a, b => guard(n => gaugeSessionEnd($, b, n as never), b, next))) as never,
+  )
+  on('session.compact', ($, e, next) =>
+    guard(n => ctSessionCompact($, e, n as never), e, a => guard(n => vcSessionCompact($, a, n as never), a, b => guard(n => gaugeSessionCompact($, b, n as never), b, next))) as never,
+  )
+  on('session.measure', gaugeSessionMeasure)
+  on('classic.SessionStart', ($, e, next) =>
+    guard(n => ctClassicSessionStart($, e, n as never), e, a => guard(n => gaugeClassicSessionStart($, a, n as never), a, next)) as never,
+  )
+  on('classic.Stop', gaugeClassicStop)
+  on('classic.PostCompact', gaugeClassicPostCompact)
+  on('turn.step', async function* ($, e, next) {
+    return yield* ctTurnStep($, e, ((a: typeof e) => gaugeTurnStep($, a, next)) as never)
   })
+  on('turn.complete', ($, e, next) => guard(n => ctTurnComplete($, e, n as never), e, a => guard(n => gaugeTurnComplete($, a, n as never), a, next)) as never)
+  on('prompt.submit', ctPromptSubmit)
+  on('config.set', { key: 'theme' }, ctConfigSetTheme)
+  on('command.run', { command: 'keepwarm' }, ctCommandRunKeepwarm)
+  on('command.run', { command: 'cache-tax' }, ctCommandRunCacheTax)
+  on('command.run', { command: 'show-last-compact' }, vcCommandRunShowLastCompact)
+  on('ui.render', { component: 'AbovePrompt' }, ($, e, next) =>
+    guard(n => ctUiRenderAbovePrompt($, e, n as never), e, a => guard(n => gaugeUiRenderAbovePrompt($, a, n as never), a, next)) as never,
+  )
+  on('ui.render', { component: 'Pane', requestId: 'visible-compact' }, vcUiRenderPaneVisibleCompact)
 }

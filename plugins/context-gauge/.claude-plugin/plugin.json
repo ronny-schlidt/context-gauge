@@ -1,6 +1,14 @@
 {
   "name": "context-gauge",
-  "version": "0.10.0",
-  "description": "Slim band above the prompt: cache time left, context in tokens with a traffic light (🟢 up to 100k, 🟡 up to 150k, 🟠 up to 200k, 🔴 beyond), the 5-hour usage limit with its reset, a Compact button and a Last compact button that shows the last compaction's summary at once.",
-  "types": "./types/index.d.ts"
+  "version": "0.11.0",
+  "description": "One mod for the prompt cache and context: a band above the prompt with cache time, context and the 5-hour limit, Compact and Last compact buttons; cache-tax (keeps the 1-hour cache warm, guards cold sends) and visible-compact (before/after pane of each compaction) built in.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "storage": {
+      "type": "string",
+      "title": "Where compactions are saved",
+      "description": "temp or home. temp (default): the OS temp folder, cleaned up by the OS (lost on reboot or after a few idle days). home: ~/.claude/visible-compact, kept until you delete it. Any other value is treated as temp.",
+      "default": "temp"
+    }
+  }
 }

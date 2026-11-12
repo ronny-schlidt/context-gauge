@@ -172,3 +172,8 @@ export function untilReset(ms: number): string {
 
   return hours > 0 ? `${hours}h ${String(minutes % 60).padStart(2, '0')}m` : `${minutes}m`
 }
+
+// A state color as a dot the desktop keeps (it draws a Button's text in one color).
+export function stateDot(color: 'green' | 'yellow' | 'red'): '🟢' | '🟠' | '🔴' {
+  return color === 'green' ? '🟢' : color === 'yellow' ? '🟠' : '🔴'
+}
